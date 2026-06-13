@@ -104,7 +104,7 @@
           src = ./.;
 
           nativeBuildInputs = with pkgs; [
-            wrapGAppsHook
+            wrapGAppsHook3
             gobject-introspection
             procps # For pgrep, pkill commands needed by configuration
           ] ++ (with python.pkgs; [
