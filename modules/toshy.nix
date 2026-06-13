@@ -4,7 +4,14 @@ with lib;
 
 let
   cfg = config.services.toshy;
-  
+
+  # KDE Plasma (KWin) window-context integration. On Wayland, per-application
+  # keymaps need the focused window's class, which Toshy obtains via a KWin
+  # script that pushes window changes to a D-Bus service. This is active only
+  # when the configured Wayland compositor is KDE/KWin.
+  kdeEnabled = cfg.wayland.enable && cfg.wayland.compositor == "kde";
+  kwinScriptName = "toshy-dbus-notifyactivewindow";
+
   # Generate configuration file content
   generateToshyConfig = {
     baseConfig = ''
@@ -183,11 +190,27 @@ in {
       enable = mkEnableOption "Wayland support";
       
       compositor = mkOption {
-        type = types.enum ["hyprland" "sway" "wlroots" "auto"];
+        type = types.enum ["hyprland" "sway" "wlroots" "kde" "auto"];
         default = "auto";
-        description = "Wayland compositor to integrate with";
+        description = ''
+          Wayland compositor to integrate with. Use "kde" for KDE Plasma
+          (KWin), which installs and runs the KWin window-context script and
+          D-Bus service needed for per-application keymaps.
+        '';
       };
-      
+
+      autoEnableKwinScript = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          When the compositor is "kde", enable the Toshy KWin script in
+          kwinrc on each login (via kwriteconfig6) and ask KWin to reload.
+          Set to false to manage the kwinrc
+          "Plugins/${kwinScriptName}Enabled" key yourself (e.g. declaratively
+          through plasma-manager).
+        '';
+      };
+
       protocols = mkOption {
         type = types.listOf types.str;
         default = ["wlr-layer-shell" "xdg-shell"];
@@ -312,11 +335,13 @@ in {
       
       wantedBy = [ "graphical-session.target" ];
       partOf = [ "graphical-session.target" ];
-      after = [ "graphical-session.target" ];
-      
+      after = [ "graphical-session.target" ]
+           ++ optionals kdeEnabled [ "toshy-kwin-dbus.service" ];
+
       # Service dependencies
       wants = optionals cfg.gui.enable [ "toshy-gui.service" ]
-           ++ optionals cfg.gui.tray [ "toshy-tray.service" ];
+           ++ optionals cfg.gui.tray [ "toshy-tray.service" ]
+           ++ optionals kdeEnabled [ "toshy-kwin-dbus.service" ];
       
       serviceConfig = {
         Type = "simple";
@@ -489,7 +514,55 @@ in {
         WAYLAND_DISPLAY = "wayland-1";
       };
     };
-    
+
+    # KDE Plasma window-context service: owns org.toshy.Plasma and caches the
+    # focused window's class for per-application keymaps. It is fed by the KWin
+    # script that ships with the package and is enabled below.
+    systemd.user.services.toshy-kwin-dbus = mkIf kdeEnabled {
+      description = "Toshy KWin D-Bus window-context service";
+      documentation = [ "https://github.com/celesrenata/toshy" ];
+
+      wantedBy = [ "graphical-session.target" ];
+      partOf = [ "graphical-session.target" ];
+      after = [ "graphical-session.target" ];
+
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = "${cfg.package}/bin/toshy-kwin-dbus";
+        Restart = "on-failure";
+        RestartSec = 5;
+        MemoryMax = "64M";
+        TasksMax = 10;
+      };
+    };
+
+    # Enable the Toshy KWin script in kwinrc and ask KWin to reload it. The
+    # script files ship with the package under share/kwin/scripts and are
+    # discovered via XDG_DATA_DIRS, but KWin only loads them once the kwinrc
+    # Plugins key is set. kwinrc is user-owned mutable state, so this is done
+    # imperatively on login rather than declaratively.
+    systemd.user.services.toshy-kwin-script =
+      mkIf (kdeEnabled && cfg.wayland.autoEnableKwinScript) {
+        description = "Enable the Toshy KWin script in kwinrc";
+        documentation = [ "https://github.com/celesrenata/toshy" ];
+
+        wantedBy = [ "graphical-session.target" ];
+        partOf = [ "graphical-session.target" ];
+        after = [ "graphical-session.target" ];
+        before = [ "toshy-kwin-dbus.service" ];
+
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          ExecStart = "${pkgs.writeShellScript "toshy-enable-kwin-script" ''
+            ${pkgs.kdePackages.kconfig}/bin/kwriteconfig6 \
+              --file kwinrc --group Plugins --key ${kwinScriptName}Enabled true
+            ${pkgs.dbus}/bin/dbus-send --type=method_call --dest=org.kde.KWin \
+              /KWin org.kde.KWin.reconfigure
+          ''}";
+        };
+      };
+
     # Configuration file generation (system-wide)
     environment.etc."toshy/config.py" = mkIf (cfg.config != "" || cfg.keybindings.applications != {}) {
       text = toshyConfigContent;

@@ -177,6 +177,25 @@
           # Skip conflict detection
           catchConflicts = false;
 
+          # KDE Plasma (KWin) window-context integration. Upstream's
+          # setup_toshy.py installs these imperatively and setuptools
+          # package-data does not cover them, so install them here:
+          #   - the KWin script that reports the focused window's class over
+          #     D-Bus (discovered by KWin via XDG_DATA_DIRS), and
+          #   - the D-Bus service that owns org.toshy.Plasma, wrapped as the
+          #     toshy-kwin-dbus executable used by the NixOS module.
+          postInstall = ''
+            kwinScriptDir=$out/share/kwin/scripts/toshy-dbus-notifyactivewindow
+            mkdir -p "$kwinScriptDir"
+            cp -r ${./kwin-script/kde5_kde6_merged/toshy-dbus-notifyactivewindow}/. "$kwinScriptDir"/
+
+            install -Dm644 ${./kwin-dbus-service/toshy_kwin_dbus_service.py} \
+              "$out/${python.sitePackages}/toshy_kwin_dbus_service.py"
+            makeWrapper ${python.interpreter} "$out/bin/toshy-kwin-dbus" \
+              --add-flags "$out/${python.sitePackages}/toshy_kwin_dbus_service.py" \
+              --prefix PYTHONPATH : "$out/${python.sitePackages}:$PYTHONPATH"
+          '';
+
           meta = with pkgs.lib; {
             description = "Mac-style keybindings for Linux";
             homepage = "https://github.com/celesrenata/toshy";
