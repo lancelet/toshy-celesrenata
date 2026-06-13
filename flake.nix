@@ -137,7 +137,8 @@
             pygobject3
             pywayland
             six
-            systemd
+            # python-systemd: renamed systemd -> systemd-python in newer nixpkgs
+            (python.pkgs.systemd-python or python.pkgs.systemd)
             watchdog  # File system monitoring
             
             # Use the same python-xlib version as xwaykeyz
