@@ -410,7 +410,10 @@ in {
         # Ensure notify-send is available
         NOTIFY_SEND = "${pkgs.libnotify}/bin/notify-send";
       } // optionalAttrs cfg.wayland.enable {
-        WAYLAND_DISPLAY = "wayland-1";  # Match actual socket name
+        # Do NOT hardcode WAYLAND_DISPLAY: the compositor's socket name varies
+        # per session (wayland-0, wayland-1, ...). Leaving it unset lets the unit
+        # inherit the real value from the systemd user manager (populated by the
+        # desktop session), so daemon.py waits on the socket that actually exists.
         XDG_SESSION_TYPE = "wayland";
       } // optionalAttrs cfg.x11.enable {
         XDG_SESSION_TYPE = "x11";
@@ -577,14 +580,19 @@ in {
     
     # Input group access for evdev (if not in restricted mode)
     users.groups.input = mkIf (!cfg.security.restrictedMode) {};
-    
-    # User configuration - only configure the main user
+
+    # The keymapper engine (xwaykeyz) must WRITE to /dev/uinput to synthesize
+    # keystrokes. Use the stock NixOS option, which loads the uinput module,
+    # creates the 'uinput' group, and ships the udev rule setting /dev/uinput to
+    # mode 0660 root:uinput. Without this the engine dies with
+    # "(EE) Failed to open `uinput` in write mode." and remapping never works.
+    hardware.uinput.enable = true;
+
+    # User configuration - only configure the main user.
+    # 'input' grants read of /dev/input/event*; 'uinput' grants write of /dev/uinput.
     users.users.${cfg.user} = mkIf cfg.security.enableInputGroup {
-      extraGroups = [ "input" ] ++ optionals (!cfg.security.restrictedMode) [ "audio" ];
+      extraGroups = [ "input" "uinput" ] ++ optionals (!cfg.security.restrictedMode) [ "audio" ];
     };
-    
-    # Note: Udev rules removed to avoid system conflicts
-    # Users should ensure they're in the 'input' group manually if needed
     
     # Enable required services based on configuration
     services.xserver.enable = mkIf cfg.x11.enable true;
