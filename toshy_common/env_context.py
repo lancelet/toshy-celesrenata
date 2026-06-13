@@ -103,7 +103,14 @@ class EnvironmentInfo:
     def is_process_running(self, process_name):
         """
         Utility function to check if a process with a specific name is running.
-        For names >15 chars, uses pgrep -f with careful pattern matching to avoid false positives.
+
+        Short names are matched exactly against the kernel 'comm' name with pgrep -x. If that
+        fails (or for names >15 chars, whose 'comm' is truncated) we fall back to a path-anchored
+        pgrep -f match against the full command line. The fallback is required on distros that
+        wrap binaries, notably NixOS, where 'comm' becomes '.<name>-wrapped' (truncated to 15
+        chars) and pgrep -x can never match, even though the executable on the command line is
+        still '<name>'. Anchoring the -f pattern on '/' or start-of-string avoids substring false
+        positives (e.g. 'kwin' matching 'kwin_wayland').
         """
         use_pgrep_i = True
 
@@ -118,22 +125,30 @@ class EnvironmentInfo:
                 use_pgrep_i = False
                 break
 
+        fallback_cmd = ['pgrep', '-f', f"(/|^){process_name}($| )"]
+
         if len(process_name) <= 15:
-            # Standard exact match for short names
+            # Standard exact match for short names (against the kernel 'comm' name)
             cmd = ['pgrep', '-x']
             if use_pgrep_i:
                 cmd.append('-i')
             cmd.append(process_name)
         else:
-            # For long names, use -f with careful pattern matching
-            pattern = f"(/|^){process_name}($| )"
-            cmd = ['pgrep', '-f', pattern]
+            # For long names the 'comm' name is truncated, so go straight to the -f match
+            cmd = fallback_cmd
 
-        try:
-            result = subprocess.check_output(cmd)
-            return bool(result.strip())
-        except subprocess.CalledProcessError:
-            return False
+        def _matches(command):
+            try:
+                return bool(subprocess.check_output(command).strip())
+            except subprocess.CalledProcessError:
+                return False
+
+        if _matches(cmd):
+            return True
+        # Fall back to the path-anchored command-line match for wrapped binaries (e.g. NixOS)
+        if cmd is not fallback_cmd:
+            return _matches(fallback_cmd)
+        return False
 
 ####################################################################################################
 ##                                                                                                ##
