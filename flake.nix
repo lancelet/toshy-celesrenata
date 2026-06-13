@@ -56,8 +56,8 @@
           src = pkgs.fetchFromGitHub {
             owner = "RedBearAK";
             repo = "xwaykeyz";
-            rev = "main";
-            hash = "sha256-WXZl787CysbuBMNvyhI0iOd+yn2Fk0tK90BSDkT8TSQ=";
+            rev = "7bd5a58f5b00733182e3fc9f2dcee8efa8c7cd03";
+            hash = "sha256-1QfO25F+X9Qb1YbfIv0a86C8rKNVzWSrRhPHIzOjDbw=";
           };
 
           nativeBuildInputs = with python.pkgs; [
