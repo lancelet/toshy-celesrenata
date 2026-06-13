@@ -533,6 +533,9 @@ in {
         RestartSec = 5;
         MemoryMax = "64M";
         TasksMax = 10;
+
+        # Needs pgrep (procps) for window-manager detection in env_context.py
+        Environment = "PATH=${pkgs.procps}/bin:${pkgs.coreutils}/bin:/etc/profiles/per-user/${cfg.user}/bin:/run/current-system/sw/bin";
       };
     };
 
